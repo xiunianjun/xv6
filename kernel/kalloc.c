@@ -19,24 +19,55 @@ struct run {
 };
 
 struct {
-  struct spinlock lock;
-  struct run *freelist;
+  struct spinlock kmem_locks[NCPU];
+  struct run *freelists[NCPU];
 } kmem;
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  for(int i=0;i<NCPU;i++){
+    char buf[8];
+    snprintf(buf,6,"kmem%d",i);
+    initlock(&kmem.kmem_locks[i], buf);
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
+// 多带一个参数表示cpuid，仅在kinit的freerange中使用
+void
+kfree_init(void *pa,int i)
+{
+  struct run *r;
+
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, PGSIZE);
+
+  r = (struct run*)pa;
+
+  r->next = kmem.freelists[i];
+  kmem.freelists[i] = r;
+}
 void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
-    kfree(p);
+   
+  // 把空闲内存页均分给每个CPU
+  uint64 sz = ((uint64)pa_end - (uint64)pa_start)/NCPU;
+  uint64 tmp = PGROUNDDOWN(sz) + (uint64)p;
+  for(int i=0;i<NCPU;i++){
+    for(; p + PGSIZE <= (char*)tmp; p += PGSIZE)
+      kfree_init(p,i);
+    tmp += PGROUNDDOWN(sz);
+    if(i == NCPU-2){
+      tmp = (uint64)pa_end;
+    }
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -56,10 +87,15 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  // 在这
+  push_off();
+  int id = cpuid();
+
+  acquire(&kmem.kmem_locks[id]);
+  r->next = kmem.freelists[id];
+  kmem.freelists[id] = r;
+  release(&kmem.kmem_locks[id]);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,12 +106,31 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  push_off();
+  int id = cpuid();
 
+  acquire(&kmem.kmem_locks[id]);
+  r = kmem.freelists[id];
+  if(r){
+    kmem.freelists[id] = r->next;
+  }
+  release(&kmem.kmem_locks[id]);
+  pop_off();
+
+  // 如果无空闲页，则窃取
+  if(!r){
+    for(int i=NCPU-1;i>=0;i--){
+      acquire(&kmem.kmem_locks[i]);
+      r = kmem.freelists[i];
+      if(r){
+        kmem.freelists[i] = r->next;
+        release(&kmem.kmem_locks[i]);
+        break;
+      }
+      release(&kmem.kmem_locks[i]);
+    }
+  }
+  
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
