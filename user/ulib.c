@@ -134,3 +134,44 @@ memcpy(void *dst, const void *src, uint n)
 {
   return memmove(dst, src, n);
 }
+
+int
+ensure_itoa_capacity(int num){
+    int i = 0;
+    if(num<0){
+        num = -num;
+        i++;
+    }
+    while(num){
+        num/=10;
+        i++;
+    }
+    return i+1;
+}
+
+void
+itoa(int num,char* res){
+    char res_tmp[strlen(res)+1];
+    int i = 0;
+    int tmp = num;
+    if(tmp<0){
+        tmp = -tmp;
+        res[i++] = '-';
+    }
+    int j = 0;
+    while(tmp){
+        res_tmp[j++] = tmp%10 + '0';
+        tmp /= 10;
+    }
+    for(j=j-1;j>=0;j--){
+        res[i++] = res_tmp[j];
+    }
+    res[i]='\0';
+}
+
+void
+strcat(char* buf,const char* s1,const char* s2)
+{
+    memcpy(buf,s1,strlen(s1));
+    memcpy(buf+strlen(s1),s2,strlen(s2)+1);
+}

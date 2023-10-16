@@ -40,3 +40,6 @@ void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
+int ensure_itoa_capacity(int num);
+void itoa(int num,char* res);
+void strcat(char* buf,const char* s1,const char* s2);
