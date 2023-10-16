@@ -1,0 +1,14 @@
+#### 代码
+
+##### 定义
+
+```c
+struct {
+  struct spinlock kmem_locks[NCPU];
+  struct run *freelists[NCPU];
+} kmem;
+```
+
+##### 初始化
+
+由于kinit仅会由一个cpu执行一次【详情见main.c】，故而我这里在kinit的做法是由一个CPU初始化所有CPU，而没有选择去修改main.c从而使每个CPU都执行一次kinit。

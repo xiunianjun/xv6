@@ -35,7 +35,9 @@ insert(int key, int value, struct entry **p, struct entry *n)
   *p = e;
 }
 
-static 
+pthread_mutex_t locks[NBUCKET];// 在main中初始化
+
+static
 void put(int key, int value)
 {
   int i = key % NBUCKET;
@@ -51,7 +53,9 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
+    pthread_mutex_lock(&locks[i]);
     insert(key, value, &table[i], table[i]);
+    pthread_mutex_unlock(&locks[i]);
   }
 }
 
