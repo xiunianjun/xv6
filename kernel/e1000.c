@@ -95,26 +95,60 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
-  
+  acquire(&e1000_lock);
+  struct tx_desc tx = tx_ring[regs[E1000_TDT]];
+  if((tx.status & 1) == 0){
+    release(&e1000_lock);
+    return -1;
+  }
+  if(tx_mbufs[regs[E1000_TDT]] != 0)    mbuffree(tx_mbufs[regs[E1000_TDT]]);
+  tx.addr = (uint64) m->head;
+  tx.length = m->len;
+  tx.status |= 1;// EOP
+  tx.cmd |= 1;//EOP
+  tx.cmd |= 8;//RS
+  tx_mbufs[regs[E1000_TDT]] = m;
+  regs[E1000_TDT] = (regs[E1000_TDT]+1)%TX_RING_SIZE;
+  // printf("send successful!\n");
+  release(&e1000_lock);
   return 0;
 }
 
 static void
 e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
+  printf("go into e1000_recv\n");
+  acquire(&e1000_lock);
+  while(1){
+  //while(regs[E1000_RDT]!=regs[E1000_RDH]){
+    printf("go into while\n");
+    regs[E1000_RDT] = (regs[E1000_RDT] + 1)%RX_RING_SIZE;
+    int i=regs[E1000_RDT];
+    if(rx_ring[i].status != 0){
+      // 包含所需数据包
+      // 检查是否发生了错误
+      //if((rx_ring[i].status & 1) !=0 && (rx_ring[i].status & 2) != 0){
+  //      // error字段有效
+  //    if(rx_ring[i].errors != 0){
+          // 发生错误，直接丢弃
+  //      goto end;
+  //    }
+      if((rx_ring[i].status & 1) == 0){
+      release(&e1000_lock);
+        return ;
+      }
+      // 将地址对应数据包发送
+      struct mbuf* m = rx_mbufs[i];
+      m->len = rx_ring[i].length;
+      net_rx(m);
+    rx_ring[i].status = 0;
+      struct mbuf* mbuf = mbufalloc(MBUF_DEFAULT_HEADROOM);
+      rx_ring[i].addr = (uint64) mbuf->head;
+      rx_mbufs[i] = mbuf;
+    }
+  }
+
+  release(&e1000_lock);
 }
 
 void
