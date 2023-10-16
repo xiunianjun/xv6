@@ -95,3 +95,21 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_trace(void)
+{
+  int mask;
+  if(argint(0,&mask)<0)
+    return -1;
+  trace(mask);
+  return 0;
+}
+
+uint64
+sys_sysinfo(void){
+  uint64 addr;
+  if(argaddr(0, &addr) < 0)
+    return -1;
+  return sysinfo((struct sysinfo*)addr);
+}

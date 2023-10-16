@@ -104,6 +104,8 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_trace(void);
+extern uint64 sys_sysinfo(void);
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -127,7 +129,47 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_sysinfo] sys_sysinfo,
+[SYS_trace]   sys_trace,
 };
+
+void strcpy(char* buf,const char* tmp){
+ int i=0;
+  while((*tmp)!='\0'){
+    buf[i++] = *tmp;
+    tmp++;
+  }
+  buf[i] = '\0';
+
+}
+
+void getname(int callid,char* buf){
+  switch(callid){
+    case SYS_fork: strcpy(buf,"fork"); break;
+    case SYS_exit: strcpy(buf,"exit"); break;
+    case SYS_wait: strcpy(buf,"wait"); break;
+    case SYS_pipe: strcpy(buf,"pipe"); break;
+    case SYS_read: strcpy(buf,"read"); break;
+    case SYS_kill: strcpy(buf,"kill"); break;
+    case SYS_exec: strcpy(buf,"exec"); break;
+    case SYS_fstat: strcpy(buf,"fstat"); break;
+    case SYS_chdir: strcpy(buf,"chdir"); break;
+    case SYS_dup: strcpy(buf,"dup"); break;
+    case SYS_getpid: strcpy(buf,"getpid"); break;
+    case SYS_sbrk: strcpy(buf,"sbrk"); break;
+    case SYS_sleep: strcpy(buf,"sleep"); break;
+    case SYS_uptime: strcpy(buf,"uptime"); break;
+    case SYS_open: strcpy(buf,"open"); break;
+    case SYS_write: strcpy(buf,"write"); break;
+    case SYS_mknod: strcpy(buf,"mknod"); break;
+    case SYS_unlink: strcpy(buf,"unlink"); break;
+    case SYS_link: strcpy(buf,"link"); break;
+    case SYS_mkdir: strcpy(buf,"mkdir"); break;
+    case SYS_close: strcpy(buf,"close"); break;
+    case SYS_trace: strcpy(buf,"trace"); break;
+    default: return;
+  }
+}
 
 void
 syscall(void)
@@ -138,6 +180,11 @@ syscall(void)
   num = p->trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     p->trapframe->a0 = syscalls[num]();
+    char buf[32];
+    getname(num,buf);
+    // 在此处添加条件打印
+    if(istraced(num))
+    	printf("%d: syscall %s -> %d\n", p->pid, buf, p->trapframe->a0);
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);

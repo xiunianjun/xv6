@@ -35,6 +35,8 @@ OBJS = \
   $K/sysfile.o \
   $K/kernelvec.o \
   $K/plic.o \
+  $K/trace.o \
+  $K/sysinfo.o \
   $K/virtio_disk.o \
 
 ifeq ($(LAB),pgtbl)
@@ -148,6 +150,8 @@ UPROGS=\
 	$U/_usertests\
 	$U/_grind\
 	$U/_wc\
+	$U/_trace\
+	$U/_sysinfotest\
 	$U/_zombie\
 
 

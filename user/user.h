@@ -1,3 +1,4 @@
+struct sysinfo;
 struct stat;
 struct rtcdate;
 
@@ -23,6 +24,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int trace(int mask);
+int sysinfo(struct sysinfo* info);
 
 // ulib.c
 int stat(const char*, struct stat*);
