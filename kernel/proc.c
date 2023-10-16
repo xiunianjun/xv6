@@ -284,6 +284,19 @@ fork(void)
 
   np->parent = p;
 
+  for(int i=0;i<NFILEMAP;i++){
+    np->filemaps[i].isused = p->filemaps[i].isused;
+    np->filemaps[i].va = p->filemaps[i].va;
+    np->filemaps[i].okva = p->filemaps[i].okva;
+    np->filemaps[i].file = p->filemaps[i].file;
+    np->filemaps[i].length = p->filemaps[i].length;
+    np->filemaps[i].flags = p->filemaps[i].flags;
+    np->filemaps[i].offset = p->filemaps[i].offset;
+    np->filemaps[i].prot = p->filemaps[i].prot;
+    if(np->filemaps[i].file)
+      filedup(np->filemaps[i].file);
+  }
+
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -350,6 +363,13 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  // 关闭map-file
+  for(int i=0;i<NFILEMAP;i++){
+    if(p->filemaps[i].isused){
+      munmap((void*)(p->filemaps[i].va),p->filemaps[i].length);
     }
   }
 

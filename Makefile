@@ -34,6 +34,7 @@ OBJS = \
   $K/exec.o \
   $K/sysfile.o \
   $K/kernelvec.o \
+  $K/mmap.o \
   $K/plic.o \
   $K/virtio_disk.o
 
@@ -173,6 +174,7 @@ UPROGS=\
 	$U/_stressfs\
 	$U/_usertests\
 	$U/_grind\
+	$U/_mmaptest\
 	$U/_wc\
 	$U/_zombie\
 

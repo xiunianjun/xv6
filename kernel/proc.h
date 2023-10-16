@@ -1,3 +1,5 @@
+#include <stddef.h>
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -82,6 +84,17 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+struct filemap{
+  uint isused;//对象池思想。该filemap是否正在被使用
+  uint64 va;//该文件的起始内存页地址
+  uint64 okva;//该文件的起始未被读入部分对应的内存地址
+  struct file* file;//文件
+  size_t length;//需要映射到内存的长度
+  int flags;//MAP_SHARED OR MAP_PRIVATE
+  int prot;//PROT_READ OR PROT_WRITE
+  uint64 offset;//va相对于file开头的offset
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -103,4 +116,6 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  
+  struct filemap filemaps[NFILEMAP];
 };

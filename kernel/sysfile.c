@@ -484,3 +484,23 @@ sys_pipe(void)
   }
   return 0;
 }
+
+// in sysproc.c
+uint64
+sys_mmap(void){
+  uint64 addr;
+  int length,prot,flags,offset;
+  struct file* file;
+  if(argaddr(0,&addr) < 0 || argint(1,&length) < 0 || argint(2,&prot) < 0 || argint(3,&flags) < 0 || argfd(4,0,&file) ||argint(5,&offset) < 0)
+    return -1;
+  return (uint64)mmap((void*)addr,(size_t)length,prot,flags,file,(uint)offset);
+}
+
+uint64
+sys_munmap(void){
+  uint64 addr;
+  int length;
+  if(argaddr(0,&addr) < 0 || argint(1,&length) < 0)
+    return -1;
+  return (uint64)munmap((void*)addr,(size_t)length);
+}

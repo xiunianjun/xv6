@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,6 +69,40 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 13 || r_scause() == 15){
+    uint64 va = r_stval();
+    for(int i=0;i<NFILEMAP;i++){
+      if(p->filemaps[i].isused&&va>=p->filemaps[i].va && va<p->filemaps[i].va+p->filemaps[i].length){
+        if(r_scause() == 15 && ((p->filemaps[i].prot)&PROT_WRITE) == 0){
+          // 说明本来就不应该写
+          p->killed = 1;
+          break;
+        }
+        if(p->filemaps[i].va+p->filemaps[i].file->ip->size <= va){
+          //说明地址不在文件范围内
+          p->killed = 1;
+          break;
+        }
+        uint64 start_va = PGROUNDDOWN(va);
+          char* mem = kalloc();
+          if(mem == 0){
+            p->killed = 1;
+            break;
+          }
+          memset(mem, 0, PGSIZE);
+          int flag = PTE_X|PTE_R|PTE_U;
+          if(((p->filemaps[i].prot)&PROT_WRITE) != 0){
+           flag |= PTE_W;
+          }
+          if(mappages(p->pagetable, start_va, PGSIZE, (uint64)mem, flag) != 0){
+            p->killed = 1;
+            kfree(mem);
+            break;
+          }
+          readi(p->filemaps[i].file->ip,0,(uint64)mem,va-p->filemaps[i].va+p->filemaps[i].offset,PGSIZE);
+        break;
+      }
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

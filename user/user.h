@@ -1,7 +1,12 @@
+#include <stddef.h>
+
 struct stat;
 struct rtcdate;
 
 // system calls
+int munmap(void* address, size_t length);
+void *mmap(void *addr, size_t length, int prot, int flags,
+           int fd, size_t offset);
 int fork(void);
 int exit(int) __attribute__((noreturn));
 int wait(int*);
