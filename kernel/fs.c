@@ -374,6 +374,10 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
+// in fs.c
+// 调试用
+static int cnt = 0;
+
 static uint
 bmap(struct inode *ip, uint bn)
 {
@@ -395,6 +399,36 @@ bmap(struct inode *ip, uint bn)
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
+    
+  // CODE HERE
+  bn -= NINDIRECT;
+  if(bn < NDOUBLEINDIRECT){
+    // 调试用
+    if(bn/10000 > cnt){
+      cnt++;
+      printf("double_indirect:%d\n",bn);
+    }
+    // 第一层
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    // 第二层
+    bp = bread(ip->dev,addr);
+    a = (uint*)bp->data;
+    if((addr = a[(bn >> 8)]) == 0){
+      a[(bn >> 8)] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    // 第三层
+    bp = bread(ip->dev,addr);
+    a = (uint*)bp->data;
+    if((addr = a[(bn & 0x00FF)]) == 0){
+      a[(bn & 0x00FF)] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
@@ -430,6 +464,29 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  // CODE HERE
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    // 双层循环。这里其实不应该用NINDIRECT这个宏定义的，因为意义其实不大一样。
+    // 但是由于数值一样，这里就先凑合着用了
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j]){
+        struct buf* tmp_bp = bread(ip->dev,a[j]);
+        uint* tmp_a = (uint*)tmp_bp->data;
+        for(int k = 0;k < NINDIRECT; k++){
+          if(tmp_a[k])
+            bfree(ip->dev,tmp_a[k]);
+        }
+        brelse(tmp_bp);
+        bfree(ip->dev,a[j]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;

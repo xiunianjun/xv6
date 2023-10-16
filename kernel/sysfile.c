@@ -304,6 +304,7 @@ sys_open(void)
       return -1;
     }
   } else {
+    // 软链接不可能是以O_CREATE的形式创建的
     if((ip = namei(path)) == 0){
       end_op();
       return -1;
@@ -314,6 +315,54 @@ sys_open(void)
       end_op();
       return -1;
     }
+
+    // 修改从这里开始
+    // 快慢指针
+    // ip为快指针，slow为慢指针
+    uint cnt = 0;
+    struct inode* slow = ip;
+    // 可能有多重链接，因而需要持续跳转
+    while(ip->type == T_SYMLINK){
+      //printf("slow = %d,fast = %d,cnt = %d\n",slow->inum,ip->inum,cnt);
+      // 其实这个只需要检测一次就够了。但为了编码方便，仍然把它保留在while循环中
+      if(omode & O_NOFOLLOW){
+        break;
+      }else{
+        // 检测到cycle
+        if(slow == ip && cnt!=0){
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        // 快指针移动
+        readi(ip,0,(uint64)path,0,MAXPATH);
+        // 此处不能用iunlockput()，具体原因见 感想-一些错误
+        iunlock(ip);
+        if((ip = namei(path)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+        // 慢指针移动
+        // 注意，我慢指针移动的时候没有锁保护，因为用锁太麻烦了（）其实还是用锁比较合适
+        if(cnt & 1){
+          //printf("%d\n",cnt);
+          readi(slow,0,(uint64)path,0,MAXPATH);
+          if((slow = namei(path) )== 0){
+            end_op();
+            return -1;
+          }
+        }
+        cnt++;
+      }
+    }
+    // 当跳出循环时，此时的ip必定是锁住的
+  }
+
+  if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
+    iunlockput(ip);
+    end_op();
+    return -1;
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -482,5 +531,39 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+// in sysfile.c
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+
+  // 创建软链接结点
+  ip = create(path,T_SYMLINK,0,0);
+  //printf("symlink:before writei,inum = %d\n",ip->inum);
+  // 此处可以防止住一些并发错误
+  if(ip ==0){
+    end_op();
+    return 0;
+  }
+  // 向软链接结点文件内写入其所指向的路径
+  writei(ip,0,(uint64)target,0,MAXPATH);
+  //printf("symlink:after writei\n");
+    
+  // 软链接不需要让nlink++
+    
+  // 记得要释放在create()中申请的锁
+  iunlockput(ip);
+
+  end_op();
+
   return 0;
 }
