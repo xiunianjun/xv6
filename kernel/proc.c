@@ -113,6 +113,12 @@ found:
     return 0;
   }
 
+  // Allocate a trapframe page.
+  if((p->savetrap = (struct trapframe *)kalloc()) == 0){
+    release(&p->lock);
+    return 0;
+  }
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){

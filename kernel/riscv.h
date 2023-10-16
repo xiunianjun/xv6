@@ -332,6 +332,14 @@ sfence_vma()
 #define PTE_X (1L << 3)
 #define PTE_U (1L << 4) // 1 -> user can access
 
+static inline uint64
+r_fp()
+{
+  uint64 x;
+  asm volatile("mv %0, s0" : "=r" (x) );
+  return x;
+}
+
 // shift a physical address to the right place for a PTE.
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
 

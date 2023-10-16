@@ -1,0 +1,26 @@
+1. a2
+
+2. 被inline掉了
+
+3. 0x64A
+
+   ![image-20230111224927837](./xv6/image-20230111224927837.png)
+
+   auipc的作用是把立即数左移12位，低12位补0，和pc相加赋给指定寄存器。这里立即数是0，指定寄存器是ra，即ra=pc=0x30=48。jalr作用是跳转到立即数+指定寄存器处并且把ra的值+8。因此jalr会跳转1562+48=1594=0x64A处，观察汇编代码可知确实在000000000000064a处。
+
+4. 0x38
+
+5. > Run the following code.
+   >
+   > ```c
+   > 	unsigned int i = 0x00646c72;
+   > 	printf("H%x Wo%s", 57616, &i);
+   > ```
+   >
+   > What is the output? [Here's an ASCII table](http://web.cs.mun.ca/~michael/c/ascii-table.html) that maps bytes to characters.
+   >
+   > The output depends on that fact that the RISC-V is **little-endian**. If the RISC-V were instead big-endian what would you set `i` to in order to yield the same output? Would you need to change `57616` to a different value?
+   >
+   > ![format,png](./xv6/format,png.png)
+
+6. 取决于寄存器a2（第3个参数）的值。

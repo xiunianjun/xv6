@@ -1,6 +1,11 @@
 struct stat;
 struct rtcdate;
 
+int 
+sigalarm(int intervel,void* handler);
+int
+sigreturn();
+
 // system calls
 int fork(void);
 int exit(int) __attribute__((noreturn));
