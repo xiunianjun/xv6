@@ -11,6 +11,9 @@
  */
 pagetable_t kernel_pagetable;
 
+extern char pages[(2<<19)];
+extern struct spinlock pages_lock;
+
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
@@ -108,6 +111,15 @@ walkaddr(pagetable_t pagetable, uint64 va)
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
+  // 在这里
+  if((*pte & PTE_COW) != 0){
+    if((*pte & PTE_W) == 0){
+      // 触发缺页中断
+      *(char*)va = 1;
+      // 更新pa值
+      pa = PTE2PA(*pte);
+    }
+  }
   return pa;
 }
 
@@ -186,9 +198,16 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
+      
+    uint64 pa = PTE2PA(*pte);
     if(do_free){
-      uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
+    } else {
+      acquire(&pages_lock);
+      if(((*pte) & PTE_COW) != 0){
+          pages[pa/PGSIZE]--;
+      }
+      release(&pages_lock);
     }
     *pte = 0;
   }
@@ -439,4 +458,38 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+cowcopy(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("cowcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("cowcopy: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    // 去除flag中的PTE_W，并且给父子的都安上没有PTE_W的flag
+    flags = (flags & (~PTE_W));
+    flags = (flags | PTE_COW);
+    *pte = ((*pte) & (~PTE_W));
+    *pte = ((*pte) | PTE_COW);
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      goto err;
+    }
+    // 标记物理页的引用数增加
+    acquire(&pages_lock);
+    pages[pa/PGSIZE]++;
+    release(&pages_lock);
+  }
+  return 0;
+ err:
+  // 失败了不能释放物理内存
+  uvmunmap(new, 0, i / PGSIZE, 0);
+  return -1;
 }

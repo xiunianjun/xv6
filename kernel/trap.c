@@ -65,6 +65,35 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 15){
+    // 只要求写入引起的缺页中断
+    uint64 va = r_stval();
+    pte_t *pte;
+    uint64 pa;
+    uint flags;
+
+    if((pte = walk(p->pagetable, va, 0)) == 0)
+        p->killed = 1;
+    else if((*pte & PTE_V) == 0)
+        p->killed = 1;
+    else {
+        pa = PTE2PA(*pte);
+        flags = PTE_FLAGS(*pte);
+
+        char* mem;
+        if((mem = kalloc())!=0){
+            memmove(mem, (char*)pa, PGSIZE);
+            // 设置为新的物理页地址
+            *pte = PA2PTE(mem);
+            // 减少引用，引用归零时释放
+            kfree((void*)pa);
+            // 设置新的flag，标记为可写
+            flags = (flags | PTE_W | PTE_COW);
+            *pte = ((*pte) | flags);
+        } else{
+            p->killed = 1;
+        }
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -133,6 +162,7 @@ usertrapret(void)
 void 
 kerneltrap()
 {
+  struct proc *p = myproc();
   int which_dev = 0;
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
@@ -143,7 +173,37 @@ kerneltrap()
   if(intr_get() != 0)
     panic("kerneltrap: interrupts enabled");
 
-  if((which_dev = devintr()) == 0){
+  if(r_scause() == 15){
+    // 只要写入引起的缺页中断
+    uint64 va = r_stval();
+    pte_t *pte;
+    uint64 pa;
+    uint flags;
+
+    if((pte = walk(p->pagetable, va, 0)) == 0)
+        p->killed = 1;
+    else if((*pte & PTE_V) == 0)
+        p->killed = 1;
+    else {
+        // 注意，这个很重要！！！！！
+        sepc += 4;
+        pa = PTE2PA(*pte);
+        flags = PTE_FLAGS(*pte);
+                                 
+        char* mem;
+        if((mem = kalloc())!=0){
+            memmove(mem, (char*)pa, PGSIZE);
+            // 设置为新的物理页地址
+            *pte = PA2PTE(mem);
+            kfree((void*)pa);
+            // 设置新的flag，标记为可写
+            flags = (flags | PTE_W | PTE_COW);
+            *pte = ((*pte) | flags);
+        } else{
+            p->killed = 1;
+        }
+    }
+  } else if((which_dev = devintr()) == 0){
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");
