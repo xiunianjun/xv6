@@ -46,9 +46,21 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  uint64 sz = myproc()->sz;
+  addr = sz;
+  if(n >= 0){
+    uint64 tmp = n + sz;
+    if(tmp > MAXVA || n + sz < n)       return -1;
+    myproc()->sz = tmp;
+    //printf("haha sb!sz=%p,n=%p\n",myproc()->sz,n);
+  } else{
+    if(n + sz > 0)
+      myproc()->sz = uvmdealloc(myproc()->pagetable, sz, sz + n);
+    else
+      return -1;
+  }
+  //if(growproc(n) < 0)
+  //  return -1;
   return addr;
 }
 
