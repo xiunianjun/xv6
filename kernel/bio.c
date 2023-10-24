@@ -32,7 +32,7 @@ struct {
   // Linked list of all buffers, through prev/next.
   // Sorted by how recently the buffer was used.
   // head.next is most recent, head.prev is least.
-  struct buf dev_heads[NBUCKET];
+  struct buf dev_heads[NBUCKET]; // 每个元素都是一个双向链表
   struct spinlock dev_locks[NBUCKET];
 } bcache;
 
@@ -41,19 +41,19 @@ binit(void)
 {
   struct buf *b = bcache.buf;
 
-  initlock(&bcache.lock, "bcache");
-    
   // 一开始先均分
-  uint64 tmp = NBUF/NBUCKET;
+  uint64 tmp = NBUF / NBUCKET;
   uint64 t = tmp;
-  for(int i=0;i<NBUCKET;i++){
+  for (int i = 0; i < NBUCKET; i++) {
     char buf[10];
-    snprintf(buf,9,"bcache%02d",i);
+    snprintf(buf, 9, "bcache%02d", i);
     initlock(&(bcache.dev_locks[i]), buf);
+
     bcache.dev_heads[i].prev = &(bcache.dev_heads[i]);
     bcache.dev_heads[i].next = &(bcache.dev_heads[i]);
-    if(i == NBUCKET-1){
-      for(;b<bcache.buf+NBUF;b++){
+
+    if(i == NBUCKET - 1){ // 最后一个
+      for( ; b < bcache.buf + NBUF; b++) {
         b->timestamp = ticks;
         b->next = bcache.dev_heads[i].next;
         b->prev = &bcache.dev_heads[i];
@@ -61,9 +61,10 @@ binit(void)
         bcache.dev_heads[i].next->prev = b;
         bcache.dev_heads[i].next = b;
       }
-    }else{
-      for(;b<bcache.buf+t;b++){
+    }else{ // 均分所有buffer块
+      for(;b < bcache.buf + t; b++) {
         b->timestamp = ticks;
+        // 把b加入到链表中
         b->next = bcache.dev_heads[i].next;
         b->prev = &bcache.dev_heads[i];
         initsleeplock(&b->lock, "buffer");
@@ -71,47 +72,62 @@ binit(void)
         bcache.dev_heads[i].next = b;
       }
     }
-      t += tmp;
+    t += tmp;
   }
 }
 
 static struct buf*
 bget(uint dev, uint blockno)
 {
-  uint hash = blockno%13;
+//  printf("bget\n");
+  uint hash = blockno % 13;
 
   acquire(&(bcache.dev_locks[hash]));
-    
+
   // Is the block already cached?
   for(struct buf* b = bcache.dev_heads[hash].next; b != &(bcache.dev_heads[hash]); b = b->next){
-    if(b->blockno == blockno&&b->dev == dev){
+    if(b->blockno == blockno&&b->dev == dev){ // 找到了
       b->refcnt++;
       b->timestamp = ticks;
+     // printf("r2\n");
       release(&(bcache.dev_locks[hash]));
       acquiresleep(&b->lock);
       return b;
     }
   }
-  release(&(bcache.dev_locks[hash]));
 
+  // 没找到，进行LRU
   // 遍历hash table，找到LRU，也即时间戳最小的且refcnt小于0的那一项
+
   acquire(&bcache.lock);
 
   uint min_time = 4294967295;// uint的最大值。此处不能使用(uint)(-1)
+  // int target_id = hash;
   struct buf* goal = 0;
-  for(int i=0;i<NBUCKET;i++){
-   uint time = 0;
-   acquire(&(bcache.dev_locks[i]));
-   for(struct buf* b = bcache.dev_heads[i].prev; b != &(bcache.dev_heads[i]); b = b->prev){
-     if(b->refcnt == 0) {
-       time = b->timestamp;
-       if(time < min_time){
-         min_time = time;
-         goal = b;
-       }
-     }
+  for(int i = 0; i < NBUCKET; i++) {
+    // int initial_hold = holding(&(bcache.dev_locks[i]));
+
+    uint time = 0;
+    // if (!initial_hold)
+    //   acquire(&(bcache.dev_locks[i]));
+    for(struct buf* b = bcache.dev_heads[i].prev; b != &(bcache.dev_heads[i]); b = b->prev){
+      if(b->refcnt == 0) {
+          time = b->timestamp;
+          if(time < min_time){
+            min_time = time;
+            // if(goal && target_id != hash && target_id != i) {
+            //  // printf("r1\n");
+            //   release(&(bcache.dev_locks[target_id]));
+            // }
+            goal = b;
+            // target_id = i;
+          }
+      }
     }
-    release(&(bcache.dev_locks[i]));
+    // if (!initial_hold && target_id != i) {
+    //          // printf("r3\n");
+    //   release(&(bcache.dev_locks[i]));
+    // }
   }
   // hashtable中存在着空闲buf
   if(goal != 0){
@@ -121,6 +137,7 @@ bget(uint dev, uint blockno)
       goal->refcnt = 1;
 
       // 将goal从其所在双向链表中移除
+
       goal->prev->next = goal->next;
       goal->next->prev = goal->prev;
 
@@ -131,8 +148,12 @@ bget(uint dev, uint blockno)
       bcache.dev_heads[hash].next->prev = goal;
       bcache.dev_heads[hash].next = goal;
 
+      release(&(bcache.dev_locks[hash]));
       release(&bcache.lock);
+      // if (target_id != hash)
+      //   release(&(bcache.dev_locks[target_id]));
       acquiresleep(&goal->lock);
+
       return goal;
   }
   panic("bget: no buffers");
@@ -161,28 +182,32 @@ bwrite(struct buf *b)
   virtio_disk_rw(b, 1);
 }
 
+// Release a locked buffer.
+// Move to the head of the most-recently-used list.
 void
 brelse(struct buf *b)
 {
+//  printf("brelse\n");
   if(!holdingsleep(&b->lock))
     panic("brelse");
 
   uint hash = b->blockno%NBUCKET;
-  releasesleep(&b->lock);
 
   acquire(&(bcache.dev_locks[hash]));
   b->refcnt--;
   b->timestamp = ticks;
-  if (b->refcnt == 0){
+  if (b->refcnt == 0) {
+    // no one is waiting for it.
     b->next->prev = b->prev;
     b->prev->next = b->next;
-
+    
     b->next = bcache.dev_heads[hash].next;
     b->prev = &bcache.dev_heads[hash];
     bcache.dev_heads[hash].next->prev = b;
     bcache.dev_heads[hash].next = b;
   }
   release(&(bcache.dev_locks[hash]));
+  releasesleep(&b->lock);
 }
 
 void
