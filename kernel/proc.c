@@ -111,6 +111,15 @@ found:
     return 0;
   }
 
+  p->kpgtbl = perproc_kvminit();
+
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  pkvmmap(p->kpgtbl,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -118,6 +127,23 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
+}
+
+extern char etext[];  // kernel.ld sets this to end of kernel code.
+
+void
+proc_freekpgtbl(pagetable_t pagetable,uint64 stack )
+{
+  uvmunmap(pagetable, UART0, 1, 0);
+  uvmunmap(pagetable, VIRTIO0, 1, 0);
+  uvmunmap(pagetable, CLINT, 0x10000/(uint64)PGSIZE, 0);
+  uvmunmap(pagetable, PLIC, 0X400000/(uint64)PGSIZE, 0);
+  uvmunmap(pagetable, KERNBASE, (uint64)((uint64)etext-KERNBASE)/PGSIZE, 0);
+  uvmunmap(pagetable, (uint64)etext,(PHYSTOP-(uint64)etext)/PGSIZE, 0);
+  //kvmmap(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  uvmunmap(pagetable, stack, 1,1 );
+  uvmfree(pagetable, 0);
 }
 
 // free a proc structure and the data hanging from it,
@@ -128,6 +154,9 @@ static void freeproc(struct proc *p) {
   p->trapframe = 0;
   if (p->pagetable) proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  if(p->kpgtbl)
+    proc_freekpgtbl(p->kpgtbl,p->kstack);
+  p->kpgtbl = 0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -193,6 +222,8 @@ void userinit(void) {
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  kvmcopy(p->pagetable, p->kpgtbl, p->sz);
+  
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -220,6 +251,7 @@ int growproc(int n) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = sz;
+  kvmcopy(p->pagetable, p->kpgtbl, p->sz);
   return 0;
 }
 
@@ -241,6 +273,13 @@ int fork(void) {
     release(&np->lock);
     return -1;
   }
+
+  if(kvmcopy(np->pagetable, np->kpgtbl, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -429,6 +468,8 @@ void scheduler(void) {
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
+        w_satp(MAKE_SATP(p->kpgtbl));
+        sfence_vma();
         c->proc = p;
         swtch(&c->context, &p->context);
 
@@ -440,8 +481,9 @@ void scheduler(void) {
       }
       release(&p->lock);
     }
-#if !defined(LAB_FS)
-    if (found == 0) {
+#if !defined (LAB_FS)
+    if(found == 0) {
+      kvminithart();
       intr_on();
       asm volatile("wfi");
     }
