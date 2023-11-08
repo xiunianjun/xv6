@@ -477,15 +477,14 @@ kvmcopy(pagetable_t up, pagetable_t kp, uint64 sz)
   uint flags;
 
   for(i = 0; i < sz; i += PGSIZE){
-    int is_find = 0;
     if ((pte = walk(kp, i, 0)) != 0 && (*pte & PTE_V) != 0) {
-      is_find = 1;
       o_pte = pte;
       if((pte = walk(up, i, 0)) == 0 || (*pte & PTE_V) == 0){
         // 如果up不存在此项，kp存在，就直接删了
         uvmunmap(kp, i, 1, 0);
-        is_find = 0;
       }
+      if (*o_pte == (*pte & (~PTE_U))) continue;
+      uvmunmap(kp, i, 1, 0);
     }
     pte = walk(up, i, 0);
 
@@ -493,17 +492,11 @@ kvmcopy(pagetable_t up, pagetable_t kp, uint64 sz)
     flags = PTE_FLAGS(*pte);
     flags = (flags & (~PTE_U)); // 注意去除PTE_U，否则内核态无法访问
 
-    if (!is_find)
-      pkvmmap(kp, i, pa, PGSIZE, flags);   // user和kernel的页表共用同一个物理页
-    else {
-      if (PTE2PA(*o_pte) != pa || PTE_FLAGS(*o_pte) != flags) { // 用户页表更改过页表项了
-        uvmunmap(kp, i, 1, 0);
-        pkvmmap(kp, i, pa, PGSIZE, flags);   // user和kernel的页表共用同一个物理页
-      }
-    }
+    pkvmmap(kp, i, pa, PGSIZE, flags);   // user和kernel的页表共用同一个物理页
   }
   return 0;
 }
+
 
 // check if use global kpgtbl or not
 int test_pagetable() {
