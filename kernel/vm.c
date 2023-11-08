@@ -486,7 +486,6 @@ kvmcopy(pagetable_t up, pagetable_t kp, uint64 sz)
         uvmunmap(kp, i, 1, 0);
         is_find = 0;
       }
-      if (*o_pte == *pte) continue;
     }
     pte = walk(up, i, 0);
 
