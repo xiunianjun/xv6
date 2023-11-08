@@ -140,9 +140,8 @@ proc_freekpgtbl(pagetable_t pagetable,uint64 stack )
   uvmunmap(pagetable, PLIC, 0X400000/(uint64)PGSIZE, 0);
   uvmunmap(pagetable, KERNBASE, (uint64)((uint64)etext-KERNBASE)/PGSIZE, 0);
   uvmunmap(pagetable, (uint64)etext,(PHYSTOP-(uint64)etext)/PGSIZE, 0);
-  //kvmmap(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(pagetable, stack, 1,1 );
+  uvmunmap(pagetable, stack, 1, 1);
   uvmfree(pagetable, 0);
 }
 
@@ -221,12 +220,12 @@ void userinit(void) {
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
-  kvmcopy(p->pagetable, p->kpgtbl, p->sz);
   
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
+
+  kvmcopy(p->pagetable, p->kpgtbl, p->sz);
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
@@ -244,6 +243,9 @@ int growproc(int n) {
 
   sz = p->sz;
   if (n > 0) {
+    if (PGROUNDUP(sz + n) >= PLIC) // 提示5
+      return -1;
+
     if ((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
@@ -472,6 +474,7 @@ void scheduler(void) {
         sfence_vma();
         c->proc = p;
         swtch(&c->context, &p->context);
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
@@ -483,7 +486,6 @@ void scheduler(void) {
     }
 #if !defined (LAB_FS)
     if(found == 0) {
-      kvminithart();
       intr_on();
       asm volatile("wfi");
     }

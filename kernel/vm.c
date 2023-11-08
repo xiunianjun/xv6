@@ -137,8 +137,8 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    // if(*pte & PTE_V)
-    //   panic("remap");
+    if(*pte & PTE_V)
+      panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if (a == last) break;
     a += PGSIZE;
@@ -390,20 +390,28 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 //在vm.c下
 void
-vmprint_helper(pagetable_t pagetable,int level)
+vmprint_helper(pagetable_t pagetable, int level, uint64 cur_va)
 {
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
     if(pte & PTE_V){
-      for(int j=0;j<level;j++){
-		printf(" ..");
+      printf("||");
+      for(int j=1;j<level;j++){
+		    printf("   ||");
       }
-      printf("%d: pte %p pa %p\n",i,(uint64)pte,(uint64)(PTE2PA(pte)));
+      int flags = PTE_FLAGS(pte);
       if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
         // this PTE points to a lower-level page table.
+        printf("idx: %d: pa: %p, flags: %s%s%s%s\n", i, (uint64)(PTE2PA(pte)), 
+          ((flags & PTE_R) == 0) ? "-" : "r", ((flags & PTE_W) == 0) ? "-" : "w", 
+          ((flags & PTE_X) == 0) ? "-" : "x", ((flags & PTE_U) == 0) ? "-" : "u");
         uint64 child = PTE2PA(pte);
-        vmprint_helper((pagetable_t)child,level+1);
+        vmprint_helper((pagetable_t)child, level+1, ((cur_va| i) << 16));
+      } else {
+        printf("idx: %d: va: %p -> pa: %p, flags: %s%s%s%s\n", i, ((cur_va | i) << 12), (uint64)(PTE2PA(pte)), 
+          ((flags & PTE_R) == 0) ? "-" : "r", ((flags & PTE_W) == 0) ? "-" : "w", 
+          ((flags & PTE_X) == 0) ? "-" : "x", ((flags & PTE_U) == 0) ? "-" : "u");
       }
     }
   }
@@ -414,8 +422,8 @@ void
 vmprint(pagetable_t pagetable)
 {
   // typedef uint64 *pagetable_t;所以pagetable可以以%p形式打印
-  printf("page table %p\n",(uint64)pagetable);
-  vmprint_helper(pagetable,1);
+  printf("page table %p\n", pagetable);
+  vmprint_helper(pagetable,1,0);
 }
 
 // in vm.c
@@ -464,24 +472,36 @@ int
 kvmcopy(pagetable_t up, pagetable_t kp, uint64 sz)
 {  
   pte_t *pte;
+  pte_t *o_pte;
   uint64 pa, i;
   uint flags;
-  // uint64 i;
 
-  for(i = 0; i < sz; i += PGSIZE){ 
-    if((pte = walk(up, i, 0)) == 0 || (*pte & PTE_V) == 0){
-        if(walk(kp,i,0) == 0){
-            //如果up不存在此项，kp存在，就直接删了
-            uvmunmap(kp,i,PGSIZE,0);
-        }
-        continue;
+  for(i = 0; i < sz; i += PGSIZE){
+    int is_find = 0;
+    if ((pte = walk(kp, i, 0)) != 0 && (*pte & PTE_V) != 0) {
+      is_find = 1;
+      o_pte = pte;
+      if((pte = walk(up, i, 0)) == 0 || (*pte & PTE_V) == 0){
+        // 如果up不存在此项，kp存在，就直接删了
+        uvmunmap(kp, i, 1, 0);
+        is_find = 0;
+      }
+      if (*o_pte == *pte) continue;
     }
+    pte = walk(up, i, 0);
 
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    // 注意去除PTE_U，否则内核态无法访问
-    flags = (flags & (~PTE_U));
-    pkvmmap(kp, i, pa, PGSIZE, flags);   
+    flags = (flags & (~PTE_U)); // 注意去除PTE_U，否则内核态无法访问
+
+    if (!is_find)
+      pkvmmap(kp, i, pa, PGSIZE, flags);   // user和kernel的页表共用同一个物理页
+    else {
+      if (PTE2PA(*o_pte) != pa || PTE_FLAGS(*o_pte) != flags) { // 用户页表更改过页表项了
+        uvmunmap(kp, i, 1, 0);
+        pkvmmap(kp, i, pa, PGSIZE, flags);   // user和kernel的页表共用同一个物理页
+      }
+    }
   }
   return 0;
 }
