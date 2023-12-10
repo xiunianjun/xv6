@@ -71,8 +71,10 @@ usertrap(void)
     syscall();
   } else if(r_scause() == 13 || r_scause() == 15){
     uint64 va = r_stval();
+    int flag = 0;
     for(int i=0;i<NFILEMAP;i++){
       if(p->filemaps[i].isused&&va>=p->filemaps[i].va && va<p->filemaps[i].va+p->filemaps[i].length){
+        flag = 1;
         if(r_scause() == 15 && ((p->filemaps[i].prot)&PROT_WRITE) == 0){
           // 说明本来就不应该写
           p->killed = 1;
@@ -102,6 +104,9 @@ usertrap(void)
           readi(p->filemaps[i].file->ip,0,(uint64)mem,va-p->filemaps[i].va+p->filemaps[i].offset,PGSIZE);
         break;
       }
+    }
+    if(!flag) {
+      p->killed = 1;
     }
   } else if((which_dev = devintr()) != 0){
     // ok
