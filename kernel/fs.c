@@ -419,16 +419,17 @@ bmap(struct inode *ip, uint bn)
     // 第二层
     bp = bread(ip->dev,addr);
     a = (uint*)bp->data;
-    if((addr = a[(bn >> 8)]) == 0){
-      a[(bn >> 8)] = addr = balloc(ip->dev);
+    if((addr = a[(bn/NINDIRECT)]) == 0){
+      a[(bn/NINDIRECT)] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
+    bn %= NINDIRECT;
     // 第三层
     bp = bread(ip->dev,addr);
     a = (uint*)bp->data;
-    if((addr = a[(bn & 0x00FF)]) == 0){
-      a[(bn & 0x00FF)] = addr = balloc(ip->dev);
+    if((addr = a[(bn)]) == 0){
+      a[(bn)] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
