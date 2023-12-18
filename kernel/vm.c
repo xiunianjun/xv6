@@ -103,10 +103,29 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0){
-    return 0;
-  }
   pa = PTE2PA(*pte);
+  
+  struct proc* p = myproc();
+  // 处理向系统调用传入lazy allocation地址的情况
+  if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 || pa == 0) {
+    // 用户态虚地址要合法 
+    if(PGROUNDUP(p->trapframe->sp) <= va && va < p->sz) {
+      char* pa = kalloc();
+      if(pa == 0)
+        return 0;
+      memset(pa, 0, PGSIZE);
+      
+      if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)pa, PTE_R | PTE_W | PTE_X | PTE_U) != 0) {
+        kfree(pa);
+        return 0;
+      }
+    } else {
+      return 0;
+    }
+    pte = walk(pagetable, va, 0);
+    pa = PTE2PA(*pte);
+  }
+
   return pa;
 }
 
@@ -387,8 +406,10 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    if(pa0 == 0) {
+      printf("copy in , %x\n", va0);
       return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
