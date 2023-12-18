@@ -44,6 +44,7 @@ void put(int key, int value)
 
   // is the key already present?
   struct entry *e = 0;
+  pthread_mutex_lock(&locks[i]);
   for (e = table[i]; e != 0; e = e->next) {
     if (e->key == key)
       break;
@@ -53,10 +54,9 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
-    pthread_mutex_lock(&locks[i]);
     insert(key, value, &table[i], table[i]);
-    pthread_mutex_unlock(&locks[i]);
   }
+  pthread_mutex_unlock(&locks[i]);
 }
 
 static struct entry*
